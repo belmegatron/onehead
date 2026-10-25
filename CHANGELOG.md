@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.60.0] - 2026-10-25
+### Changed
+- DNS failures are now logged as a single line naming the host that could not be resolved, rather than a full traceback. discord.py logs one of these per reconnect attempt, and an outage would otherwise bury every other log line.
+- Logging is now set up before the bot is built, so startup is logged too.
+
 ## [1.59.1] - 2026-08-31
 ### Changed
 - Bumped discordpy version due to introduction of DAVE protocol.

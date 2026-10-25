@@ -1,6 +1,6 @@
 [project]
 name = "onehead"
-version = "1.60.2"
+version = "1.61.0"
 description = "A Dota 2 in-house league Discord bot."
 license = { text = "MIT" }
 readme = "README.md"

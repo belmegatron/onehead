@@ -4,27 +4,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.60.2] - 2026-10-25
-### Fixed
-- Entering a result with any capitalisation, such as `!result Radiant`, updated the scoreboard correctly but matched no bets, so every winning bettor silently lost their stake. `!result` now takes the winner from the validated side rather than from the raw argument.
-- A newly created database was unusable: the metadata row was written without the `name` field every query filters on, so the first `!start`, `!result` or `!season` failed and `update_metadata` duplicated the row rather than updating it. Existing databases were unaffected.
-- `voice_client_disconnect` polled forever when there was no voice client to disconnect from, leaving an immortal task behind every `!reset`, `!challenge` and `!reject` where nobody was in voice.
-- Background tasks that are never awaited are now kept referenced until they finish, rather than being left for the garbage collector to claim mid-execution, and the exceptions they raise are logged instead of discarded.
+## [1.61.0] - 2026-10-25
 
-- `reset` raised when a game was abandoned before teams were balanced, leaving the game marked in progress and the bot unable to start or stop another until it was restarted.
-- A second `!start` issued while the first was still setting up could begin a second game. `max_concurrency` releases as soon as the command returns, which is before any of the work is done.
-- A bettor who was deregistered between placing a bet and the result aborted the payout part way through and skipped the reset, leaving a re-issued `!result` free to pay everyone a second time.
+A sweep through the findings of two code review passes. Most of these are long-standing
+bugs rather than regressions.
+
+### Fixed
+- Entering a result with any capitalisation, such as `!result Radiant`, updated the scoreboard correctly but matched no bets, so every winning bettor silently lost their stake and winnings.
+- A newly created database was unusable: the metadata row was written without the `name` field every query filters on, so the first `!start`, `!result` or `!season` failed, and `update_metadata` duplicated the row rather than updating it. Existing databases were unaffected.
+- `!shuffle` charged 500 RBUCKS, and persisted the charge, before working out the new teams - and that can fail whenever the signups have changed, which an admin using `!rm` during the transfer window is enough to cause. The player was left out of pocket with the teams untouched. The charge now happens once there is a shuffle to hand over.
+- Two `!shuffle` commands in quick succession both read the same balance and both wrote it decremented once, giving two shuffles for the price of one.
+- An accepted duel that no admin ever started stayed in the challenge list for the lifetime of the process, leaving its challenger unable to issue another and with no explanation.
+- The expiry announcement was sent before the challenge was removed from the list, so a send that failed a day later left it stuck there permanently.
+- A and B could each hold a live duel against the other. `!challenge` now spots the reverse pairing and points you at `!accept`.
+- `!challenge` sent no message at all - appearing to do nothing - when the opponent of your existing challenge had since left the guild.
+- Rejecting an opponent far below your MMR played the taunt and left the bot sitting in the voice channel indefinitely.
+- `reset` raised when a game was abandoned before teams were balanced, leaving the game marked in progress and the bot unable to start or stop another until it was restarted, with every `!stop` refunding bets again on the way to the same error.
+- A second `!start` issued while the first was still setting up could begin a second game, because `max_concurrency` releases as soon as the command returns rather than when the work is done.
+- A bettor deregistered between placing a bet and the result aborted the payout part way through and skipped the reset, leaving a re-issued `!result` free to pay everyone a second time.
 - `!balance` reported too few signups and then carried on into a guaranteed failure.
 - Stale signups were never reaped: `cleanup_inactive_players` captured the current game once before its loop, when there is almost never a game in progress.
-- Selection with more than ten signups compared the registered name against signups keyed by Discord nickname, dropping anyone who had been renamed since registering.
+- Renaming yourself in Discord had consequences all over the place, as several checks compared a stored name against a current one. A renamed player could not be selected from more than ten signups, could not `!commend` or `!report`, could not `!shuffle`, was not moved into their team's voice channel, was silently skipped by a transfer refund, and could have a duel bet or payout misrouted. These all settle on Discord ids now.
+- A refund that could not find everyone no longer announces that all transactions were refunded.
+- `voice_client_disconnect` polled forever when there was no voice client to disconnect from, leaving an immortal task behind every `!reset`, `!challenge` and `!reject` where nobody was in voice.
+- Background tasks that are never awaited are now kept referenced until they finish, rather than left for the garbage collector to claim mid-execution, and what they raise is logged rather than discarded.
 - Seasons ended one game early.
 - `!summon` raised `IndexError` instead of reporting a missing IHL role.
 - `!recalibrate` accepted any MMR, bypassing the bounds `!register` enforces, and gave an unhelpful error for a non-numeric one.
 - Challenge odds for a player missing from the database raised `RuntimeError: No active exception to re-raise`.
 - `Player` could not be put in a set or used as a dict key.
+- The message rejecting a duel against a much weaker player claimed your opponent had to be "within" 4000 MMR of yours, describing a symmetric rule. Challenging far above your own MMR is allowed and always was; only picking on someone far below it is not.
 
 ### Changed
 - Team balancing generates the 126 valid matchups directly instead of building 31,626 and discarding the 99.6% that share a player. Same matchups, 36.3ms down to 0.37ms.
+- Players are moved into and out of the team voice channels concurrently rather than one at a time, so starting and resetting a game no longer waits out ten sequential round trips to Discord.
+- A shuffle that draws the teams you already have redraws without repeating the "Balancing teams..." and MMR messages, and gives up after ten attempts rather than looping until the dice oblige.
 - `get_all` uses TinyDB's public API rather than reaching into `_read_table`.
 
 ## [1.60.1] - 2026-10-25

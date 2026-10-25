@@ -1,5 +1,7 @@
 from asyncio import gather
+from collections.abc import Coroutine
 from logging import Logger
+from typing import Any
 
 from discord import VoiceChannel
 from discord.errors import HTTPException
@@ -74,7 +76,13 @@ class Channels(Cog):
 
         lobby: VoiceChannel = selected_channels[0]
 
-        await gather(*(move_member(player, lobby) for team in members for player in team))
+        moves: list[Coroutine[Any, Any, None]] = []
+
+        for team in members:
+            for player in team:
+                moves.append(move_member(player, lobby))
+
+        await gather(*moves)
 
     async def move_discord_channels(self, ctx: Context, members: tuple[list[Member], list[Member]]) -> None:
         """
@@ -98,10 +106,10 @@ class Channels(Cog):
 
         t1_channel, t2_channel = self.ihl_discord_channels
 
-        await gather(
-            *(
-                move_member(member, channel)
-                for team, channel in ((t1_discord_members, t1_channel), (t2_discord_members, t2_channel))
-                for member in team
-            )
-        )
+        moves: list[Coroutine[Any, Any, None]] = []
+
+        for team, channel in ((t1_discord_members, t1_channel), (t2_discord_members, t2_channel)):
+            for member in team:
+                moves.append(move_member(member, channel))
+
+        await gather(*moves)

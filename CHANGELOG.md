@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.60.1] - 2026-10-25
+### Changed
+- Bumped `aiohttp`, `multidict`, `idna`, `pygments` and `pytest`.
+
+### Fixed
+- The SBOM step of the publish workflow asked for the image under a tag that is never published, failing the workflow after the image had already been pushed. It now uses the digest from the build step.
+
 ## [1.60.0] - 2026-10-25
 ### Changed
 - DNS failures are now logged as a single line naming the host that could not be resolved, rather than a full traceback. discord.py logs one of these per reconnect attempt, and an outage would otherwise bury every other log line.

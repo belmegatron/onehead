@@ -53,6 +53,7 @@ jobs:
           type=sha
 
     - name: Build and push Docker image
+      id: build
       uses: docker/build-push-action@v5
       with:
         context: .
@@ -63,10 +64,13 @@ jobs:
         cache-to: type=gha,mode=max
         platforms: linux/amd64,linux/arm64
 
+    # Address the image by the digest the build step just pushed. The tags come from
+    # metadata-action, so there is no tag here we can rely on - `type=sha` publishes
+    # the short, prefixed form (sha-55ffbd2), not github.sha.
     - name: Generate SBOM
       uses: anchore/sbom-action@v0
       with:
-        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
         format: spdx-json
         output-file: sbom.spdx.json
 

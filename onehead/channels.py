@@ -1,3 +1,4 @@
+from asyncio import gather
 from logging import Logger
 
 from discord import VoiceChannel
@@ -12,6 +13,22 @@ from onehead.config import Config, DiscordChannelConfig
 from onehead.store import GameStore
 
 log: Logger = get_logger()
+
+
+async def move_member(member: Member, channel: VoiceChannel) -> None:
+    """
+    Move one member into a voice channel, reporting a refusal rather than raising.
+
+    Keeping the failure local means one member who cannot be moved does not abandon
+    the rest, which matters now that the moves are issued together.
+
+    :param member: The member to move.
+    :param channel: The channel to move them to.
+    """
+    try:
+        await member.move_to(channel)
+    except HTTPException as ex:
+        log.error(f"Failed to move {member.display_name} to {channel.name} due to {ex}.")
 
 
 class Channels(Cog):
@@ -57,12 +74,7 @@ class Channels(Cog):
 
         lobby: VoiceChannel = selected_channels[0]
 
-        for team in members:
-            for player in team:
-                try:
-                    await player.move_to(lobby)
-                except HTTPException as ex:
-                    log.error(f"Failed to move {player.display_name} to {lobby.name} due to {ex}")
+        await gather(*(move_member(player, lobby) for team in members for player in team))
 
     async def move_discord_channels(self, ctx: Context, members: tuple[list[Member], list[Member]]) -> None:
         """
@@ -86,15 +98,10 @@ class Channels(Cog):
 
         t1_channel, t2_channel = self.ihl_discord_channels
 
-        for team, channel in (
-            (t1_discord_members, t1_channel),
-            (
-                t2_discord_members,
-                t2_channel,
-            ),
-        ):
-            for member in team:
-                try:
-                    await member.move_to(channel)
-                except HTTPException as ex:
-                    log.error(f"Failed to move {member.display_name} to {channel.name} due to {ex}.")
+        await gather(
+            *(
+                move_member(member, channel)
+                for team, channel in ((t1_discord_members, t1_channel), (t2_discord_members, t2_channel))
+                for member in team
+            )
+        )

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import discord.ext.test as dpytest
 import pytest
-from conftest import add_ihl_role
+from conftest import add_ihl_role, create_fake_player, create_fake_team
 from discord.ext.commands import Bot
 
 from onehead.betting import Betting
@@ -321,3 +321,41 @@ class TestSelectPlayersWithRenamedMember:
         dropped: set[str] = set(signups) - set(lobby._signups)
         lowest: Player = min(players, key=lambda p: p.behaviour)
         assert dropped == {name for name, player in by_signup.items() if player.id == lowest.id}
+
+
+class TestBehaviourWithRenamedMember:
+    """
+    commend and report checked participation by comparing the author's display name
+    against the registered names held in the teams, so a player who changed their
+    Discord nickname after registering was told they had not played.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_renamed_participant_can_still_commend(self, bot: Bot) -> None:
+        from conftest import join_member
+
+        store: GameStore = cast(GameStore, bot.get_cog("GameStore"))
+        behaviour = bot.get_cog("Behaviour")
+
+        author = list(bot.get_all_members())[0]
+        target = await join_member(bot, "RBEEZAY")
+
+        game: ClassicGame = ClassicGame()
+        # The author played, but their record still carries the name they registered under.
+        game.radiant = (
+            Player(id=author.id, name="NAME_FROM_BEFORE_THE_RENAME", mmr=3000),
+            Player(id=target.id, name="RBEEZAY", mmr=3000),
+            create_fake_player(),
+            create_fake_player(),
+            create_fake_player(),
+        )
+        game.dire = create_fake_team()
+        store.previous_game = game
+
+        behaviour.database.get = MagicMock(return_value=Player(id=target.id, name="RBEEZAY", mmr=3000, behaviour=5000))
+        behaviour.database.update = MagicMock()
+
+        await add_ihl_role(bot, "IHL")
+        await dpytest.message("!commend RBEEZAY")
+
+        assert dpytest.verify().message().content("has been commended").contains()

@@ -55,6 +55,45 @@ async def add_ihl_role(bot: Bot, role: str, name: str | None = None) -> None:
     await dpytest.add_role(target_member, ihl_role)
 
 
+async def join_member(bot: Bot, name: str) -> Member:
+    """
+    Add a member to the test guild and hand them back.
+
+    Needed before building a team that is meant to contain them, as a player record
+    carries the member's Discord id.
+
+    :param bot: The bot under test.
+    :param name: The member's account name.
+    :return: The member.
+    """
+    await dpytest.member_join(name=name)
+
+    return [member for member in bot.get_all_members() if member.name == name][0]
+
+
+def get_test_member(bot: Bot) -> Member:
+    """
+    The member that dpytest sends messages as.
+
+    :param bot: The bot under test.
+    :return: The member.
+    """
+    return list(bot.get_all_members())[0]
+
+
+def create_test_player(bot: Bot) -> Player:
+    """
+    Build a player record for the member dpytest sends messages as.
+
+    A player's id is their Discord id, so a record standing in for a real participant
+    has to carry the member's id rather than a placeholder.
+
+    :param bot: The bot under test.
+    :return: The player.
+    """
+    return Player(id=get_test_member(bot).id, name=TEST_USER, mmr=3000)
+
+
 def create_fake_player() -> Player:
     id: int = random.randint(0, 99999)
     name: str = f"user_{id}"

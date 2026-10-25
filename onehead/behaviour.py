@@ -12,7 +12,6 @@ from onehead.common import (
     Player,
     Roles,
     get_discord_member_from_name,
-    get_player_names,
 )
 from onehead.game import ClassicGame, Game
 from onehead.interfaces.database import PlayerDatabase
@@ -54,11 +53,11 @@ class Behaviour(Cog):
 
             commender: Member | User = ctx.author
 
-            radiant: tuple[str, ...]
-            dire: tuple[str, ...]
-            radiant, dire = get_player_names(previous_game.radiant, previous_game.dire)
+            # Match on id rather than name - the teams hold registered names, which a
+            # player who has since changed their Discord nickname no longer matches.
+            participants: set[int] = {player.id for player in previous_game.radiant + previous_game.dire}
 
-            if commender.display_name not in radiant and commender.display_name not in dire:
+            if commender.id not in participants:
                 await ctx.send(
                     f"{commender.mention} did not participate in the previous game and therefore cannot commend another player."
                 )
@@ -74,7 +73,7 @@ class Behaviour(Cog):
                 await ctx.send(f"{commender.mention} you cannot commend yourself, nice try...")
                 return
 
-            if commendee.display_name not in radiant and commendee.display_name not in dire:
+            if commendee.id not in participants:
                 await ctx.send(
                     f"{commendee.mention} cannot be commended as they did not participate in the previous game."
                 )
@@ -130,11 +129,10 @@ class Behaviour(Cog):
 
         reporter: Member | User = ctx.author
 
-        radiant: tuple[str, ...]
-        dire: tuple[str, ...]
-        radiant, dire = get_player_names(previous_game.radiant, previous_game.dire)
+        # Match on id rather than name, as above.
+        participants: set[int] = {player.id for player in previous_game.radiant + previous_game.dire}
 
-        if reporter.display_name not in radiant and reporter.display_name not in dire:
+        if reporter.id not in participants:
             await ctx.send(
                 f"{reporter.mention} did not participate in the previous game and therefore cannot report another player."
             )
@@ -151,7 +149,7 @@ class Behaviour(Cog):
             )
             return
 
-        if reported.display_name not in radiant and reported.display_name not in dire:
+        if reported.id not in participants:
             await ctx.send(f"{reported.mention} cannot be reported as they did not participate in the previous game.")
             return
 

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.60.2] - 2026-10-25
+### Fixed
+- `voice_client_disconnect` polled forever when there was no voice client to disconnect from, leaving an immortal task behind every `!reset`, `!challenge` and `!reject` where nobody was in voice.
+- Background tasks that are never awaited are now kept referenced until they finish, rather than being left for the garbage collector to claim mid-execution, and the exceptions they raise are logged instead of discarded.
+
+### Changed
+- Team balancing generates the 126 valid matchups directly instead of building 31,626 and discarding the 99.6% that share a player. Same matchups, 36.3ms down to 0.37ms.
+
 ## [1.60.1] - 2026-10-25
 ### Changed
 - Bumped `aiohttp`, `multidict`, `idna`, `pygments` and `pytest`.

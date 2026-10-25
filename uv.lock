@@ -620,7 +620,7 @@ wheels = [
 
 [[package]]
 name = "onehead"
-version = "1.60.1"
+version = "1.60.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

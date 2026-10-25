@@ -1,7 +1,5 @@
-from asyncio import gather
-from collections.abc import Coroutine
+from asyncio import TaskGroup
 from logging import Logger
-from typing import Any
 
 from discord import VoiceChannel
 from discord.errors import HTTPException
@@ -22,7 +20,7 @@ async def move_member(member: Member, channel: VoiceChannel) -> None:
     Move one member into a voice channel, reporting a refusal rather than raising.
 
     Keeping the failure local means one member who cannot be moved does not abandon
-    the rest, which matters now that the moves are issued together.
+    the rest - the TaskGroup these run in would otherwise cancel its siblings.
 
     :param member: The member to move.
     :param channel: The channel to move them to.
@@ -76,13 +74,10 @@ class Channels(Cog):
 
         lobby: VoiceChannel = selected_channels[0]
 
-        moves: list[Coroutine[Any, Any, None]] = []
-
-        for team in members:
-            for player in team:
-                moves.append(move_member(player, lobby))
-
-        await gather(*moves)
+        async with TaskGroup() as moves:
+            for team in members:
+                for player in team:
+                    moves.create_task(move_member(player, lobby))
 
     async def move_discord_channels(self, ctx: Context, members: tuple[list[Member], list[Member]]) -> None:
         """
@@ -106,10 +101,7 @@ class Channels(Cog):
 
         t1_channel, t2_channel = self.ihl_discord_channels
 
-        moves: list[Coroutine[Any, Any, None]] = []
-
-        for team, channel in ((t1_discord_members, t1_channel), (t2_discord_members, t2_channel)):
-            for member in team:
-                moves.append(move_member(member, channel))
-
-        await gather(*moves)
+        async with TaskGroup() as moves:
+            for team, channel in ((t1_discord_members, t1_channel), (t2_discord_members, t2_channel)):
+                for member in team:
+                    moves.create_task(move_member(member, channel))

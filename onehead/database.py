@@ -55,13 +55,7 @@ class Database(PlayerDatabase):
         self.players.update(asdict(modified), doc_ids=[document.doc_id])
 
     def get_all(self) -> list[Player]:
-        table: dict[str, dict] = cast(dict[str, dict], self.players._read_table())
-        records: list[Player] = []
-        for entry in table.values():
-            record: Player = from_dict(Player, entry)
-            records.append(record)
-
-        return records
+        return [from_dict(Player, dict(document)) for document in self.players.all()]
 
     def get_metadata(self) -> Metadata:
         q: Query = Query()

@@ -18,26 +18,39 @@ class Registration(Cog):
     def __init__(self, database: PlayerDatabase) -> None:
         self.database: PlayerDatabase = database
 
+    async def _validate_mmr(self, ctx: Context, mmr: str, usage: str) -> int | None:
+        """
+        Check an MMR argument is a number within the bounds the IHL accepts.
+
+        :param ctx: Discord context.
+        :param mmr: The MMR as the user typed it.
+        :param usage: Example of correct usage, shown when the MMR is not a number.
+        :return: The MMR, or None if it was not usable - the caller has been told why.
+        """
+        try:
+            mmr_int: int = int(mmr)
+        except ValueError:
+            await ctx.send(f"{ctx.author.mention}, the command you are looking for is {usage}")
+            return None
+
+        if mmr_int < self.MIN_MMR:
+            await ctx.send(f"`{mmr}` MMR is too low, must be greater or equal to `{self.MIN_MMR}`.")
+            return None
+
+        if mmr_int > self.MAX_MMR:
+            await ctx.send(f"`{mmr}` MMR is too high, must be less than or equal to `{self.MAX_MMR}`.")
+            return None
+
+        return mmr_int
+
     @has_role(Roles.MEMBER)
     @command(aliases=["reg"])
     async def register(self, ctx: Context, mmr: str) -> None:
         """
         Register yourself to the IHL by typing !register <your mmr>.
         """
-        try:
-            mmr_int: int = int(mmr)
-        except ValueError:
-            await ctx.send(
-                f"{ctx.author.mention}, the command you are looking for is `!register <MMR>` (e.g. `!register 9000`)"
-            )
-            return
-
-        if mmr_int < self.MIN_MMR:
-            await ctx.send(f"`{mmr}` MMR is too low, must be greater or equal to `{self.MIN_MMR}`.")
-            return
-
-        if mmr_int > self.MAX_MMR:
-            await ctx.send(f"`{mmr}` MMR is too high, must be less than or equal to `{self.MAX_MMR}`.")
+        mmr_int: int | None = await self._validate_mmr(ctx, mmr, "`!register <MMR>` (e.g. `!register 9000`)")
+        if mmr_int is None:
             return
 
         player: Player | None = self.database.get(ctx.author.id)
@@ -74,7 +87,7 @@ class Registration(Cog):
 
     @has_role(Roles.ADMIN)
     @command(aliases=["recal"])
-    async def recalibrate(self, ctx: Context, name: str, new_mmr: int) -> None:
+    async def recalibrate(self, ctx: Context, name: str, new_mmr: str) -> None:
         """
         Update a player's in-house MMR to reflect a recent change in Dota 2 MMR.
         """
@@ -89,7 +102,15 @@ class Registration(Cog):
             await ctx.send(f"Unable to recalibrate {member.mention} as they do not exist in the database.")
             return
 
-        record.mmr = new_mmr
+        # An out of range MMR here would corrupt team balancing just as surely as one
+        # given to !register, so hold it to the same bounds.
+        mmr_int: int | None = await self._validate_mmr(
+            ctx, new_mmr, f"`!recalibrate <name> <MMR>` (e.g. `!recalibrate {name} 9000`)"
+        )
+        if mmr_int is None:
+            return
+
+        record.mmr = mmr_int
         self.database.update(record)
 
         log.info(f"{name} has had their MMR changed to {new_mmr} by {ctx.author.name}.")

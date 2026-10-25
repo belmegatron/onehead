@@ -117,9 +117,15 @@ class Matchmaking(Cog):
 
         rating_differences: list[int] = self._calculate_rating_differences(unique_combinations)
 
-        # Sort by ascending rating difference
+        # Sort by ascending rating difference. Sorting on the difference alone matters:
+        # comparing the pairs wholesale falls through to comparing Players whenever two
+        # differences are equal, and Player orders by rating while it compares by id.
         sorted_unique_combinations: list[TeamCombination] = [
-            combo for _, combo in sorted(zip(rating_differences, unique_combinations, strict=False))
+            combo
+            for _, combo in sorted(
+                zip(rating_differences, unique_combinations, strict=True),
+                key=lambda pair: pair[0],
+            )
         ]
 
         # Take the top 20 that are closest in terms of rating and pick one at random.
@@ -139,6 +145,9 @@ class Matchmaking(Cog):
         if signup_count != 10:
             err: str = f"Only `{signup_count}` Signups, require `{10 - signup_count}` more."
             await ctx.send(err)
+            # Carrying on only reached _calculate_balance, which raises anyway, with a
+            # message about the database rather than the signups.
+            raise OneHeadException(err)
 
         radiant: Team
         dire: Team

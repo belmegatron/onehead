@@ -16,6 +16,7 @@ from discord.ext.commands import (
 from discord.guild import Guild
 from discord.member import Member
 from discord.role import Role
+from discord.utils import get
 from structlog import get_logger
 from tabulate import tabulate
 
@@ -68,8 +69,9 @@ class Lobby(Cog):
         if guild is None:
             raise OneHeadException("No Guild associated with Discord context.")
 
-        ihl_role: Role = [x for x in guild.roles if x.name == Roles.MEMBER][0]
-        if not ihl_role:
+        ihl_role: Role | None = get(guild.roles, name=str(Roles.MEMBER))
+        if ihl_role is None:
+            await ctx.send(f"No `{Roles.MEMBER}` role exists in {guild.name}.")
             return
 
         await ctx.send(f"IHL DOTA - LET'S GO! {ihl_role.mention}")
@@ -117,33 +119,34 @@ class Lobby(Cog):
 
             original_signups: list[str] = self.get_signups()
 
-            players: list[Player] = []
-            members: list[Member] = []
+            # Keep each signup alongside the member and record it resolved to. Selecting on
+            # the database name instead would drop anyone who changed their Discord
+            # nickname after registering, as the signups are keyed by display name.
+            candidates: list[tuple[str, Member, Player]] = []
 
             for signup in original_signups:
                 member: Member | None = get_discord_member_from_name(ctx, signup)
                 if member is None:
                     continue
 
-                members.append(member)
-
                 player: Player | None = self.database.get(member.id)
 
                 if player is None:
                     raise OneHeadException(f"Unable to find {signup} in database.")
 
-                players.append(player)
+                candidates.append((signup, member, player))
 
-            top_10_players_by_behaviour_score: list[Player] = sorted(players, key=lambda x: x.behaviour, reverse=True)[
-                :10
-            ]
-            top_10_names_by_behaviour_score: list[str] = [player.name for player in top_10_players_by_behaviour_score]
-            self._signups = {name: ts for name, ts in self._signups.items() if name in top_10_names_by_behaviour_score}
+            top_10_by_behaviour_score: list[tuple[str, Member, Player]] = sorted(
+                candidates, key=lambda candidate: candidate[2].behaviour, reverse=True
+            )[:10]
+            selected_signups: set[str] = {signup for signup, _, _ in top_10_by_behaviour_score}
+
+            self._signups = {name: ts for name, ts in self._signups.items() if name in selected_signups}
 
             benched_players: list[str] = [
-                member.mention for member in members if member.display_name not in self._signups
+                member.mention for signup, member, _ in candidates if signup not in selected_signups
             ]
-            selected_players: list[str] = [member.mention for member in members if member.display_name in self._signups]
+            selected_players: list[str] = [member.mention for _, member, _ in top_10_by_behaviour_score]
 
             await ctx.send(f"**Benched Players:** \n{', '.join(benched_players)}")
             await ctx.send(f"**Selected Players:** \n{', '.join(selected_players)}")
@@ -299,28 +302,36 @@ class Lobby(Cog):
         Some players never seem to trigger an 'Idle' or 'Offline' status change and therefore
         the `on_presence_update` callback never gets called for them.
         """
-        current_game: Game | None = self.store.current_game
-
         max_signup_period: timedelta = timedelta(hours=4)
         self._cleanup_is_running = True
 
-        while True:
-            to_remove: list[str] = []
+        try:
+            while True:
+                # Read the game each time round. Snapshotting it before the loop pinned it
+                # to whatever was going on at the first signup - almost always nothing - so
+                # the sweep below never ran. Stale signups matter precisely when no game is
+                # running, so a missing game must not skip it either.
+                current_game: Game | None = self.store.current_game
 
-            if current_game and current_game.in_progress() is False:
-                for name, signup_time in self._signups.items():
-                    if datetime.now() >= (signup_time + max_signup_period):
-                        to_remove.append(name)
+                to_remove: list[str] = []
 
-            for name in to_remove:
-                self.remove_player_from_signups(name)
-                member: Member | None = get_discord_member_from_name(ctx, name)
-                log.debug(
-                    f"{name} was removed from the signup pool by {ctx.bot.user.name} due to being inactive for over {max_signup_period}."
-                )
-                if member:
-                    await ctx.send(
-                        f"{member.mention} has been removed from the signup pool by {ctx.bot.user.mention} due to being inactive for over `{max_signup_period}`."
+                if current_game is None or current_game.in_progress() is False:
+                    for name, signup_time in self._signups.items():
+                        if datetime.now() >= (signup_time + max_signup_period):
+                            to_remove.append(name)
+
+                for name in to_remove:
+                    self.remove_player_from_signups(name)
+                    member: Member | None = get_discord_member_from_name(ctx, name)
+                    log.debug(
+                        f"{name} was removed from the signup pool by {ctx.bot.user.name} due to being inactive for over {max_signup_period}."
                     )
+                    if member:
+                        await ctx.send(
+                            f"{member.mention} has been removed from the signup pool by {ctx.bot.user.mention} due to being inactive for over `{max_signup_period}`."
+                        )
 
-            await sleep(3600)
+                await sleep(3600)
+        finally:
+            # Let the next signup start a fresh sweep if this one died or was cancelled.
+            self._cleanup_is_running = False

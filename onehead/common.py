@@ -28,7 +28,14 @@ MAX_PLAYBACK_WAIT_SECONDS: int = 300
 _background_tasks: set[Task] = set()
 
 
-def _log_task_exception(task: Task) -> None:
+def log_task_exception(task: Task) -> None:
+    """
+    Report whatever a task raised, as a done callback.
+
+    Without this the exception sits unretrieved on the task and is never seen.
+
+    :param task: The task that has finished.
+    """
     if task.cancelled():
         return
 
@@ -50,7 +57,7 @@ def create_background_task(coro: Coroutine[Any, Any, Any], name: str) -> Task:
     """
     task: Task = create_task(coro, name=name)
     _background_tasks.add(task)
-    task.add_done_callback(_log_task_exception)
+    task.add_done_callback(log_task_exception)
     task.add_done_callback(_background_tasks.discard)
 
     return task
@@ -95,6 +102,11 @@ class Player:
 
     def __ne__(self, other) -> bool:
         return self.id != other.id
+
+    # dataclass sets __hash__ to None whenever it sees an __eq__, which leaves Player
+    # unusable in a set or as a dict key. Hash on what __eq__ compares.
+    def __hash__(self) -> int:
+        return hash(self.id)
 
 
 Team = tuple[Player, Player, Player, Player, Player]

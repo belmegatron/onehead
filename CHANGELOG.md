@@ -11,8 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `voice_client_disconnect` polled forever when there was no voice client to disconnect from, leaving an immortal task behind every `!reset`, `!challenge` and `!reject` where nobody was in voice.
 - Background tasks that are never awaited are now kept referenced until they finish, rather than being left for the garbage collector to claim mid-execution, and the exceptions they raise are logged instead of discarded.
 
+- `reset` raised when a game was abandoned before teams were balanced, leaving the game marked in progress and the bot unable to start or stop another until it was restarted.
+- A second `!start` issued while the first was still setting up could begin a second game. `max_concurrency` releases as soon as the command returns, which is before any of the work is done.
+- A bettor who was deregistered between placing a bet and the result aborted the payout part way through and skipped the reset, leaving a re-issued `!result` free to pay everyone a second time.
+- `!balance` reported too few signups and then carried on into a guaranteed failure.
+- Stale signups were never reaped: `cleanup_inactive_players` captured the current game once before its loop, when there is almost never a game in progress.
+- Selection with more than ten signups compared the registered name against signups keyed by Discord nickname, dropping anyone who had been renamed since registering.
+- Seasons ended one game early.
+- `!summon` raised `IndexError` instead of reporting a missing IHL role.
+- `!recalibrate` accepted any MMR, bypassing the bounds `!register` enforces, and gave an unhelpful error for a non-numeric one.
+- Challenge odds for a player missing from the database raised `RuntimeError: No active exception to re-raise`.
+- `Player` could not be put in a set or used as a dict key.
+
 ### Changed
 - Team balancing generates the 126 valid matchups directly instead of building 31,626 and discarding the 99.6% that share a player. Same matchups, 36.3ms down to 0.37ms.
+- `get_all` uses TinyDB's public API rather than reaching into `_read_table`.
 
 ## [1.60.1] - 2026-10-25
 ### Changed

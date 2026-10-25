@@ -10,6 +10,7 @@ from tabulate import tabulate
 from onehead.challenge import ChallengeMode
 from onehead.common import (
     Bet,
+    OneHeadException,
     Player,
     Roles,
     Side,
@@ -277,7 +278,11 @@ class Betting(Cog):
         opponent: Player | None = self.database.get(challenge.opponent.id)
 
         if challenger is None or opponent is None:
-            raise
+            raise OneHeadException(
+                f"Cannot calculate odds for challenge {challenge.id} as "
+                f"{challenge.challenger.display_name} or {challenge.opponent.display_name} "
+                "is no longer in the database."
+            )
 
         mmr_difference: int = challenger.mmr - opponent.mmr
 

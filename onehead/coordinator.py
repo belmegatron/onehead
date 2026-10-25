@@ -28,6 +28,7 @@ from onehead.common import (
     get_command_from_cog,
     get_discord_member_from_name,
     get_player_names,
+    log_task_exception,
     play_sound,
     voice_client_disconnect,
 )
@@ -79,12 +80,21 @@ class GameCoordinator(Cog):
             await ctx.send("Game already in progress...")
             return
 
+        # max_concurrency releases its slot as soon as this returns, which is immediately,
+        # as the work happens in a task - so it cannot stop a second !start racing the
+        # first. current_game is not set until part way through that task, so checking it
+        # above is not enough either. The task set is populated before we yield, so it is.
+        if self.start_tasks:
+            await ctx.send("Game is already starting...")
+            return
+
         if duel_id:
             start_task: Task = create_task(self.start_challenge(ctx, duel_id))
         else:
             start_task: Task = create_task(self.start_classic_game(ctx))
 
         self.start_tasks.add(start_task)
+        start_task.add_done_callback(log_task_exception)
         start_task.add_done_callback(self.start_tasks.discard)
 
     @has_role(Roles.ADMIN)
@@ -205,7 +215,11 @@ class GameCoordinator(Cog):
 
                     record: Player | None = self.database.get(member.id)
                     if record is None:
-                        raise OneHeadException(f"Unable to award find {member.mention} in database")
+                        # Raising here would abandon the remaining payouts and skip the
+                        # reset that follows, leaving the game live and a re-issued !result
+                        # free to pay everyone a second time.
+                        log.error(f"Unable to pay out {name} as they are no longer in the database.")
+                        continue
 
                     record.rbucks += int(bet_result.stake)
                     record.rbucks += int(bet_result.winnings)
@@ -460,13 +474,19 @@ class GameCoordinator(Cog):
     async def reset(self, ctx: Context, game_cancelled=False) -> None:
         if self.store.current_game:
             if isinstance(self.store.current_game, Challenge):
-                self.challenge_mode.challenges.remove(self.store.current_game)
+                if self.store.current_game in self.challenge_mode.challenges:
+                    self.challenge_mode.challenges.remove(self.store.current_game)
             elif isinstance(self.store.current_game, ClassicGame):
                 self.lobby.clear_signups()
-                create_background_task(
-                    self.channels.move_back_to_lobby(ctx, self.get_discord_members(ctx)),
-                    "move_back_to_lobby",
-                )
+                # Teams are None when the game never got as far as being balanced, in which
+                # case nobody was moved into the team channels. get_discord_members would
+                # raise, and anything raising here leaves current_game set and the bot
+                # unable to start or stop a game until it is restarted.
+                if self.store.current_game.radiant and self.store.current_game.dire:
+                    create_background_task(
+                        self.channels.move_back_to_lobby(ctx, self.get_discord_members(ctx)),
+                        "move_back_to_lobby",
+                    )
 
         if game_cancelled:
             self.store.previous_game = None
@@ -479,4 +499,7 @@ class GameCoordinator(Cog):
 
     def is_end_of_season(self) -> bool:
         metadata: Metadata = self.database.get_metadata()
-        return metadata.game_id >= metadata.max_game_count
+        # game_id is the game about to be played, and this is checked after it has been
+        # incremented past the game just recorded, so the season ends once it goes beyond
+        # the limit. Comparing with >= here ended seasons a game early.
+        return metadata.game_id > metadata.max_game_count

@@ -82,10 +82,13 @@ class ChallengeMode(Cog):
                 f"Failed to obtain database record for {challenger.display_name if challenger_record is None else opponent.display_name}"
             )
 
+        # Deliberately one directional: challenging far above your MMR is allowed, picking
+        # on someone far below it is not. Do not be tempted to make this abs().
         if challenger_record.mmr - opponent_record.mmr > self.MAX_RATING_DIFFERENCE:
             await play_sound(ctx, "bully.mp3")
             await ctx.send(
-                f"{challenger.mention}, your opponent must be within `{self.MAX_RATING_DIFFERENCE}` MMR of your MMR in order to duel them."
+                f"{challenger.mention}, your opponent cannot be more than `{self.MAX_RATING_DIFFERENCE}` "
+                "MMR below you. Pick on someone your own size."
             )
             return
 

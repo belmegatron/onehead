@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.60.2] - 2026-10-25
 ### Fixed
+- Entering a result with any capitalisation, such as `!result Radiant`, updated the scoreboard correctly but matched no bets, so every winning bettor silently lost their stake. `!result` now takes the winner from the validated side rather than from the raw argument.
+- A newly created database was unusable: the metadata row was written without the `name` field every query filters on, so the first `!start`, `!result` or `!season` failed and `update_metadata` duplicated the row rather than updating it. Existing databases were unaffected.
 - `voice_client_disconnect` polled forever when there was no voice client to disconnect from, leaving an immortal task behind every `!reset`, `!challenge` and `!reject` where nobody was in voice.
 - Background tasks that are never awaited are now kept referenced until they finish, rather than being left for the garbage collector to claim mid-execution, and the exceptions they raise are logged instead of discarded.
 

@@ -125,8 +125,10 @@ class GameCoordinator(Cog):
         winner: Side | Member | None = None
 
         if isinstance(self.store.current_game, ClassicGame):
-            await self.handle_classic_game_result(ctx, result)
-            winner = cast(Side, result)
+            # The handler validates and normalises the side, so take the winner from it
+            # rather than from the raw argument - `!result Radiant` would otherwise score
+            # correctly but match no bets, as selections are always stored lower case.
+            winner = await self.handle_classic_game_result(ctx, result)
         elif isinstance(self.store.current_game, Challenge):
             winner = await self.handle_challenge_result(ctx, result)
 
@@ -374,7 +376,7 @@ class GameCoordinator(Cog):
                 record.rbucks += Betting.REWARD_ON_WIN
                 self.database.update(record)
 
-    async def handle_classic_game_result(self, ctx: Context, result: str) -> None:
+    async def handle_classic_game_result(self, ctx: Context, result: str) -> Side:
         self.store.current_game = cast(ClassicGame, self.store.current_game)
 
         if self.store.current_game.transfer_window_open():
@@ -395,9 +397,9 @@ class GameCoordinator(Cog):
             await ctx.send(f"Must be either {Side.RADIANT} or {Side.DIRE}.")
             raise OneHeadException("Failed to handle classic game result due to incorrect side entered")
 
-        result = cast(Side, result)
+        winner: Side = Side(result)
 
-        log.info(f"{ctx.author.display_name} entered a result of {result}.")
+        log.info(f"{ctx.author.display_name} entered a result of {winner}.")
 
         if self.store.current_game.radiant is None or self.store.current_game.dire is None:
             raise OneHeadException(
@@ -411,7 +413,7 @@ class GameCoordinator(Cog):
         await play_sound(ctx, "result.mp3")
 
         await ctx.send("Updating scores...")
-        await self.update_database_with_classic_result(ctx, result)
+        await self.update_database_with_classic_result(ctx, winner)
 
         command: Command | None = get_command_from_cog(self.scoreboard, "scoreboard")
         if command:
@@ -427,6 +429,8 @@ class GameCoordinator(Cog):
             self.database.update_metadata(metadata)
             # TODO: Make a big song and dance about the end of an IHL season, present winners, go crazy.
             # TODO: Wipe scoreboard.
+
+        return winner
 
     def get_discord_members(self, ctx: Context) -> tuple[list[Member], list[Member]]:
         current_game: Game | None = self.store.current_game

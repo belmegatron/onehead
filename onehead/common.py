@@ -107,6 +107,8 @@ class Metadata:
     season: int = 1
     game_id: int = 1
     max_game_count: int = 50
+    # The metadata table is queried by name, so the row has to carry one.
+    name: str = "season"
 
 
 class Roles(StrEnum):

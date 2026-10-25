@@ -16,6 +16,7 @@ from onehead.common import (
     OneHeadException,
     Player,
     Roles,
+    create_background_task,
     get_discord_member_from_id,
     get_discord_member_from_name,
     play_sound,
@@ -98,7 +99,7 @@ class ChallengeMode(Cog):
 
         challenge: Challenge = Challenge(next(self.counter), challenger=challenger, opponent=opponent)
         challenge.handle_expiration_task = create_task(self.handle_expired_challenge(ctx, challenge))
-        create_task(voice_client_disconnect(ctx))
+        create_background_task(voice_client_disconnect(ctx), "voice_client_disconnect")
         self.challenges.append(challenge)
 
     @has_role(Roles.MEMBER)
@@ -166,7 +167,7 @@ class ChallengeMode(Cog):
         else:
             await ctx.send(f"Unable to find challenge issued to {ctx.author.mention} by {name}.")
 
-        create_task(voice_client_disconnect(ctx))
+        create_background_task(voice_client_disconnect(ctx), "voice_client_disconnect")
 
     async def find_issued_challenge(self, ctx: Context, challenger_name: str) -> Challenge | None:
         guild: Guild | None = ctx.guild

@@ -1,4 +1,4 @@
-from asyncio import create_task, sleep
+from asyncio import sleep
 from datetime import datetime, timedelta
 from logging import Logger
 from typing import Any
@@ -23,6 +23,7 @@ from onehead.common import (
     OneHeadException,
     Player,
     Roles,
+    create_background_task,
     get_discord_member_from_name,
     play_sound,
 )
@@ -188,7 +189,7 @@ class Lobby(Cog):
         log.info(f"{name} has signed up.")
 
         if self._cleanup_is_running is False:
-            create_task(self.cleanup_inactive_players(ctx))
+            create_background_task(self.cleanup_inactive_players(ctx), "cleanup_inactive_players")
 
         await Command.invoke(self.who, ctx)
 

@@ -1,9 +1,11 @@
-from asyncio import sleep
+from asyncio import Task, create_task, sleep
+from collections.abc import Coroutine
 from dataclasses import dataclass
 from enum import StrEnum
 from logging import Logger
 from pathlib import Path
-from typing import cast
+from time import monotonic
+from typing import Any, cast
 
 from discord.channel import VocalGuildChannel
 from discord.ext.commands import Cog, Command, Context
@@ -17,6 +19,41 @@ log: Logger = get_logger()
 
 
 ROOT_DIR: Path = Path(__file__).resolve().parent.parent
+
+# How long to wait for a sound to finish playing before disconnecting regardless.
+MAX_PLAYBACK_WAIT_SECONDS: int = 300
+
+# Tasks we start but never await. asyncio only holds a weak reference to a running task,
+# so without a reference of our own they can be collected before they finish.
+_background_tasks: set[Task] = set()
+
+
+def _log_task_exception(task: Task) -> None:
+    if task.cancelled():
+        return
+
+    exception: BaseException | None = task.exception()
+    if exception:
+        log.error(f"Background task '{task.get_name()}' failed due to {exception!r}.")
+
+
+def create_background_task(coro: Coroutine[Any, Any, Any], name: str) -> Task:
+    """
+    Schedule a coroutine we do not intend to await, keeping it alive until it finishes.
+
+    Holding the reference stops the task being garbage collected mid-execution, and gives
+    us somewhere to notice the exceptions that would otherwise be swallowed silently.
+
+    :param coro: The coroutine to run.
+    :param name: Name used to identify the task in logs.
+    :return: The scheduled task.
+    """
+    task: Task = create_task(coro, name=name)
+    _background_tasks.add(task)
+    task.add_done_callback(_log_task_exception)
+    task.add_done_callback(_background_tasks.discard)
+
+    return task
 
 
 @dataclass
@@ -183,13 +220,31 @@ async def play_sound(ctx: Context, file_name: str) -> None:
 
 
 async def voice_client_disconnect(ctx: Context) -> None:
+    """
+    Wait for whatever is playing to finish, then leave the voice channel.
+
+    :param ctx: Discord context.
+    """
+    deadline: float = monotonic() + MAX_PLAYBACK_WAIT_SECONDS
+
     while True:
         voice_client: VoiceClient | None = cast(VoiceClient | None, ctx.voice_client)
-        if voice_client and voice_client.is_playing() is False:
+
+        # play_sound skips playback when the caller is not in a voice channel, so there is
+        # often nothing to disconnect from. Returning keeps this task from living forever.
+        if voice_client is None:
+            return
+
+        if voice_client.is_playing() is False:
             await voice_client.disconnect()
-            break
-        else:
-            await sleep(5)
+            return
+
+        if monotonic() >= deadline:
+            log.warning(f"Playback has not finished after {MAX_PLAYBACK_WAIT_SECONDS}s, disconnecting anyway.")
+            await voice_client.disconnect()
+            return
+
+        await sleep(5)
 
 
 def get_command_from_cog(cog: Cog, name: str) -> Command | None:

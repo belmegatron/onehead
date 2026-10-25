@@ -24,6 +24,7 @@ from onehead.common import (
     Player,
     Roles,
     Side,
+    create_background_task,
     get_command_from_cog,
     get_discord_member_from_name,
     get_player_names,
@@ -231,7 +232,10 @@ class GameCoordinator(Cog):
                     f"Expected valid teams: {self.store.current_game.radiant}, {self.store.current_game.dire}"
                 )
 
-            create_task(self.channels.move_discord_channels(ctx, self.get_discord_members(ctx)))
+            create_background_task(
+                self.channels.move_discord_channels(ctx, self.get_discord_members(ctx)),
+                "move_discord_channels",
+            )
 
     async def start_challenge(self, ctx: Context, duel_id: str) -> None:
         try:
@@ -455,7 +459,10 @@ class GameCoordinator(Cog):
                 self.challenge_mode.challenges.remove(self.store.current_game)
             elif isinstance(self.store.current_game, ClassicGame):
                 self.lobby.clear_signups()
-                create_task(self.channels.move_back_to_lobby(ctx, self.get_discord_members(ctx)))
+                create_background_task(
+                    self.channels.move_back_to_lobby(ctx, self.get_discord_members(ctx)),
+                    "move_back_to_lobby",
+                )
 
         if game_cancelled:
             self.store.previous_game = None
@@ -464,7 +471,7 @@ class GameCoordinator(Cog):
 
         self.store.current_game = None
 
-        create_task(voice_client_disconnect(ctx))
+        create_background_task(voice_client_disconnect(ctx), "voice_client_disconnect")
 
     def is_end_of_season(self) -> bool:
         metadata: Metadata = self.database.get_metadata()

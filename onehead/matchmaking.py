@@ -1,7 +1,7 @@
 import itertools
 import random
 from logging import Logger
-from typing import Any
+from typing import Any, cast
 
 from discord.ext.commands import Cog, Context, command, has_role
 from discord.member import Member
@@ -47,25 +47,28 @@ class Matchmaking(Cog):
 
     @staticmethod
     def _calculate_unique_team_combinations(
-        all_matchups: list[TeamCombination],
+        profiles: list[Player],
     ) -> list[TeamCombination]:
         """
         Calculates all 5v5 combinations, where the players on each team are unique to that particular team.
 
-        :param all_matchups: All possible 5v5 combinations, including combinations with the same player on each team.
+        Choosing Radiant determines Dire, as Dire is whoever is left over. Keeping one player on
+        Radiant throughout also means each matchup is produced once rather than once per side, so
+        there are no duplicates or overlaps to discard afterwards.
 
+        :param profiles: Player profiles for the players that are playing.
         :return: Unique team combinations.
         """
+        first: Player = profiles[0]
+        rest: list[Player] = profiles[1:]
+
         unique_combinations: list[TeamCombination] = []
 
-        for matchup in all_matchups:
-            shared_players: bool = False
-            for player in matchup[0]:
-                if player in matchup[1]:
-                    shared_players = True
-                    break
-            if shared_players is False:
-                unique_combinations.append(matchup)
+        for remainder in itertools.combinations(rest, 4):
+            radiant: Team = cast(Team, (first,) + remainder)
+            radiant_ids: set[int] = {player.id for player in radiant}
+            dire: Team = cast(Team, tuple(player for player in profiles if player.id not in radiant_ids))
+            unique_combinations.append((radiant, dire))
 
         return unique_combinations
 
@@ -102,17 +105,15 @@ class Matchmaking(Cog):
         if profile_count != 10:
             raise OneHeadException(f"Only `{profile_count}` profiles could be found in database.")
 
+        # Two signups resolving to the same member would otherwise yield a team of fewer
+        # than five players, as Dire is whoever is not on Radiant.
+        if len({player.id for player in profiles}) != profile_count:
+            raise OneHeadException("No valid matchups could be calculated. Possible duplicate player name.")
+
         Rating.calculate_rating(profiles)
         Rating.calculate_adjusted_mmr(profiles)
 
-        team_combinations: list[Team] = list(itertools.combinations(profiles, 5))
-
-        matchup_combinations: list[TeamCombination] = list(itertools.combinations(team_combinations, 2))
-
-        unique_combinations: list[TeamCombination] = self._calculate_unique_team_combinations(matchup_combinations)
-
-        if not unique_combinations:
-            raise OneHeadException("No valid matchups could be calculated. Possible duplicate player name.")
+        unique_combinations: list[TeamCombination] = self._calculate_unique_team_combinations(profiles)
 
         rating_differences: list[int] = self._calculate_rating_differences(unique_combinations)
 

@@ -34,7 +34,9 @@ class TestBets:
 
         store: GameStore = cast(GameStore, bot.get_cog("GameStore"))
         store.current_game = ClassicGame()
-        store.current_game._bets.append(Bet(selection="dire", stake=1000, bettor="RBEEZAY"))
+        store.current_game._bets.append(
+            Bet(selection="dire", stake=1000, bettor="RBEEZAY", bettor_id=210079807906643980)
+        )
 
         await dpytest.message("!bets")
         assert dpytest.verify().message().content("**Bets** ```\n").contains()

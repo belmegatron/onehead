@@ -1,6 +1,5 @@
 from dataclasses import asdict, dataclass
 from logging import Logger
-from typing import cast
 
 from discord.ext.commands import Cog, Context, command, has_role
 from discord.member import Member
@@ -30,6 +29,8 @@ class BetResult:
     win: bool
     stake: float = 0
     winnings: float = 0
+    # Carried for the report, which is keyed by id rather than name.
+    bettor: str = ""
 
 
 class Betting(Cog):
@@ -42,10 +43,10 @@ class Betting(Cog):
         self.database: PlayerDatabase = database
         self.lobby: Lobby = lobby
 
-    def get_bet_results(self, winner: Side | Member) -> dict[str, list[BetResult]]:
+    def get_bet_results(self, winner: Side | Member) -> dict[int, list[BetResult]]:
         current_game: Game | None = self.store.current_game
 
-        bet_results: dict[str, list[BetResult]] = {}
+        bet_results: dict[int, list[BetResult]] = {}
 
         if current_game is None:
             return bet_results
@@ -53,24 +54,27 @@ class Betting(Cog):
         active_bets: list[Bet] = current_game.get_bets()
 
         for bet in active_bets:
-            if bet_results.get(bet.bettor) is None:
-                bet_results[bet.bettor] = []
+            if bet_results.get(bet.bettor_id) is None:
+                bet_results[bet.bettor_id] = []
 
+            # Settle on ids for a duel. Comparing the stored display name against the
+            # winner's current one voided the bet of anyone who renamed themselves between
+            # placing it and the result.
             if isinstance(winner, Member):
-                winner = cast(Member, winner)
-                winner_name: str = winner.display_name
+                backed_the_winner: bool = bet.selection_id == winner.id
             else:
-                winner_name = winner
+                backed_the_winner = bet.selection == winner
 
-            if bet.selection == winner_name:
+            if backed_the_winner:
                 bet_result: BetResult = BetResult(
                     win=True,
                     stake=bet.stake,
                     winnings=(bet.stake * bet.price) - bet.stake,
+                    bettor=bet.bettor,
                 )
             else:
-                bet_result: BetResult = BetResult(win=False, winnings=(-1 * bet.stake))
-            bet_results[bet.bettor].append(bet_result)
+                bet_result: BetResult = BetResult(win=False, winnings=(-1 * bet.stake), bettor=bet.bettor)
+            bet_results[bet.bettor_id].append(bet_result)
 
         return bet_results
 
@@ -143,7 +147,7 @@ class Betting(Cog):
 
             challenger_price, opponent_price = self.calculate_challenge_odds(current_game)
 
-            if bet.selection == current_game.challenger.display_name:
+            if bet.selection_id == current_game.challenger.id:
                 bet.price = challenger_price
             else:
                 bet.price = opponent_price
@@ -182,13 +186,13 @@ class Betting(Cog):
         await ctx.send(f"**RBUCKS** ```\n{bucks_board}```")
 
     @staticmethod
-    def create_bet_report(bet_results: dict[str, list[BetResult]]) -> str:
+    def create_bet_report(bet_results: dict[int, list[BetResult]]) -> str:
         contents: str = ""
 
-        for name, results in bet_results.items():
+        for results in bet_results.values():
             for result in results:
                 won_or_lost: str = "won" if result.win else "lost"
-                line: str = f"{name} {won_or_lost} {abs(result.winnings):.0f} RBUCKS!"
+                line: str = f"{result.bettor} {won_or_lost} {abs(result.winnings):.0f} RBUCKS!"
                 log.info(line)
                 contents += line
                 contents += "\n"
@@ -207,12 +211,13 @@ class Betting(Cog):
             return
 
         for bet in active_bets:
-            member: Member | None = get_discord_member_from_name(ctx, bet.bettor)
-            if member:
-                record: Player | None = self.database.get(member.id)
-                if record:
-                    record.rbucks += bet.stake
-                    self.database.update(record)
+            record: Player | None = self.database.get(bet.bettor_id)
+            if record is None:
+                log.error(f"Unable to refund {bet.stake} RBUCKS as bettor {bet.bettor} is not in the database.")
+                continue
+
+            record.rbucks += bet.stake
+            self.database.update(record)
 
         log.info("Refunded all bets.")
         await ctx.send("All bets have been refunded.")
@@ -221,6 +226,7 @@ class Betting(Cog):
         self, ctx: Context, current_game: Game, first: str, second: str, record: Player
     ) -> Bet | None:
         selection: str = ""
+        selection_id: int | None = None
         amount: str = ""
 
         if isinstance(current_game, ClassicGame):
@@ -237,11 +243,13 @@ class Betting(Cog):
             member: Member | None = get_discord_member_from_name(ctx, first)
             if member in (current_game.challenger, current_game.opponent):
                 selection = member.display_name
+                selection_id = member.id
                 amount = second
             else:
                 member = get_discord_member_from_name(ctx, second)
                 if member in (current_game.challenger, current_game.opponent):
                     selection = member.display_name
+                    selection_id = member.id
                     amount = first
 
             if selection == "":
@@ -263,7 +271,13 @@ class Betting(Cog):
                     f"{ctx.author.mention} - `{amount}` is not a valid number of RBUCKS to place a bet with."
                 )
 
-        return Bet(bettor=ctx.author.display_name, selection=selection, stake=stake)
+        return Bet(
+            bettor=ctx.author.display_name,
+            bettor_id=ctx.author.id,
+            selection=selection,
+            stake=stake,
+            selection_id=selection_id,
+        )
 
     @staticmethod
     def convert_decimal_odds_to_percentage_odds(decimal_odds: float) -> float:

@@ -135,16 +135,23 @@ class Side(StrEnum):
 
 @dataclass
 class PlayerTransfer:
-    buyer: str
+    # The buyer's Discord id, not their name - a refund has to find them even if they have
+    # renamed themselves since paying.
+    buyer_id: int
     amount: int
 
 
 @dataclass
 class Bet:
+    # The names are what the bet report shows. The ids are what it is settled on - names
+    # drift when someone renames themselves between placing a bet and the result.
     bettor: str
+    bettor_id: int
     selection: str
     stake: int
     price: float = 2.0
+    # The duelist being backed. None for a classic game, where `selection` is a Side.
+    selection_id: int | None = None
 
 
 class OneHeadException(Exception):

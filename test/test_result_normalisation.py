@@ -1,14 +1,17 @@
 from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from discord.member import Member
 from discord.ext.commands import Bot
 
 from onehead.betting import Bet, BetResult, Betting
 from onehead.common import Side
 from onehead.coordinator import GameCoordinator
-from onehead.game import ClassicGame
+from onehead.game import Challenge, ClassicGame
 from onehead.store import GameStore
+
+BETTOR_ID: int = 210079807906643980
 
 
 class TestBetSelectionMatchesTheWinner:
@@ -51,13 +54,14 @@ class TestBetSelectionMatchesTheWinner:
         game: ClassicGame = ClassicGame()
         game._in_progress = True
         # parse_bet_arguments only ever stores a lower case side.
-        game._bets = [Bet(bettor="RBEEZAY", selection=Side.RADIANT, stake=100, price=2.0)]
+        game._bets = [Bet(bettor="RBEEZAY", bettor_id=BETTOR_ID, selection=Side.RADIANT, stake=100, price=2.0)]
         store.current_game = game
 
-        results: dict[str, list[BetResult]] = betting.get_bet_results(Side(typed.lower()))
+        results: dict[int, list[BetResult]] = betting.get_bet_results(Side(typed.lower()))
 
-        assert results["RBEEZAY"][0].win is True
-        assert results["RBEEZAY"][0].winnings == 100
+        assert results[BETTOR_ID][0].win is True
+        assert results[BETTOR_ID][0].winnings == 100
+        assert results[BETTOR_ID][0].bettor == "RBEEZAY"
 
     @pytest.mark.asyncio
     async def test_a_bet_on_the_losing_side_does_not_pay_out(self, bot: Bot) -> None:
@@ -66,9 +70,66 @@ class TestBetSelectionMatchesTheWinner:
 
         game: ClassicGame = ClassicGame()
         game._in_progress = True
-        game._bets = [Bet(bettor="RBEEZAY", selection=Side.DIRE, stake=100, price=2.0)]
+        game._bets = [Bet(bettor="RBEEZAY", bettor_id=BETTOR_ID, selection=Side.DIRE, stake=100, price=2.0)]
         store.current_game = game
 
-        results: dict[str, list[BetResult]] = betting.get_bet_results(Side.RADIANT)
+        results: dict[int, list[BetResult]] = betting.get_bet_results(Side.RADIANT)
 
-        assert results["RBEEZAY"][0].win is False
+        assert results[BETTOR_ID][0].win is False
+
+
+class TestDuelBetsSettleOnIds:
+    """
+    A duel bet stored the backed duelist's display name and compared it against the
+    winner's display name at result time, so renaming yourself mid-duel voided the bet.
+    The same applied to the bettor, whose payout was looked up by name.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_winning_duel_bet_pays_out_after_a_rename(self, bot: Bot) -> None:
+        betting: Betting = cast(Betting, bot.get_cog("Betting"))
+        store: GameStore = cast(GameStore, bot.get_cog("GameStore"))
+
+        # spec=Member so that get_bet_results takes its duel branch rather than its Side one.
+        challenger = MagicMock(spec=Member)
+        challenger.id = 111
+        challenger.display_name = "THE_NAME_THEY_HAVE_NOW"
+
+        game = Challenge(1, challenger, MagicMock(id=222))
+        game._in_progress = True
+        # The bet was placed when they were called something else.
+        game._bets = [
+            Bet(
+                bettor="BETTOR",
+                bettor_id=BETTOR_ID,
+                selection="THE_NAME_THEY_HAD_THEN",
+                selection_id=111,
+                stake=100,
+                price=2.0,
+            )
+        ]
+        store.current_game = game
+
+        results = betting.get_bet_results(challenger)
+
+        assert results[BETTOR_ID][0].win is True
+        assert results[BETTOR_ID][0].winnings == 100
+
+    @pytest.mark.asyncio
+    async def test_a_losing_duel_bet_still_loses(self, bot: Bot) -> None:
+        betting: Betting = cast(Betting, bot.get_cog("Betting"))
+        store: GameStore = cast(GameStore, bot.get_cog("GameStore"))
+
+        winner = MagicMock(spec=Member)
+        winner.id = 222
+
+        game = Challenge(1, MagicMock(id=111), winner)
+        game._in_progress = True
+        game._bets = [
+            Bet(bettor="BETTOR", bettor_id=BETTOR_ID, selection="OTHER", selection_id=111, stake=100, price=2.0)
+        ]
+        store.current_game = game
+
+        results = betting.get_bet_results(winner)
+
+        assert results[BETTOR_ID][0].win is False

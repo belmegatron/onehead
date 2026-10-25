@@ -204,21 +204,19 @@ class GameCoordinator(Cog):
         return winner
 
     async def handle_bet_results(self, ctx: Context, winner: Side | Member) -> None:
-        bet_results: dict[str, list[BetResult]] = self.betting.get_bet_results(winner)
+        bet_results: dict[int, list[BetResult]] = self.betting.get_bet_results(winner)
 
-        for name, bets in bet_results.items():
+        for bettor_id, bets in bet_results.items():
             for bet_result in bets:
                 if bet_result.win:
-                    member: Member | None = get_discord_member_from_name(ctx, name)
-                    if member is None:
-                        continue
-
-                    record: Player | None = self.database.get(member.id)
+                    # The bet carries the bettor's id, so there is no name to resolve - and
+                    # nothing for a rename between the bet and the result to break.
+                    record: Player | None = self.database.get(bettor_id)
                     if record is None:
                         # Raising here would abandon the remaining payouts and skip the
                         # reset that follows, leaving the game live and a re-issued !result
                         # free to pay everyone a second time.
-                        log.error(f"Unable to pay out {name} as they are no longer in the database.")
+                        log.error(f"Unable to pay out {bet_result.bettor} as they are no longer in the database.")
                         continue
 
                     record.rbucks += int(bet_result.stake)
@@ -463,13 +461,14 @@ class GameCoordinator(Cog):
         if current_game is None or current_game.radiant is None or current_game.dire is None:
             raise OneHeadException("Unable to get discord members due to invalid game state.")
 
-        t1_names: tuple[str, ...]
-        t2_names: tuple[str, ...]
+        # Match on id. Comparing guild display names against the registered names held in
+        # the teams meant a player who had renamed themselves was never found, and so was
+        # left behind rather than moved into their team's channel.
+        t1_ids: set[int] = {player.id for player in current_game.radiant}
+        t2_ids: set[int] = {player.id for player in current_game.dire}
 
-        t1_names, t2_names = get_player_names(current_game.radiant, current_game.dire)
-
-        t1_discord_members: list[Member] = [x for x in guild.members if x.display_name in t1_names]
-        t2_discord_members: list[Member] = [x for x in guild.members if x.display_name in t2_names]
+        t1_discord_members: list[Member] = [x for x in guild.members if x.id in t1_ids]
+        t2_discord_members: list[Member] = [x for x in guild.members if x.id in t2_ids]
 
         return t1_discord_members, t2_discord_members
 

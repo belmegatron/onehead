@@ -104,27 +104,17 @@ class TestBetPayoutResilience:
         present: Player = coordinator.database.get_all()[0]
         starting_rbucks: int = present.rbucks
 
+        # A bettor who has been deregistered since placing their bet, keyed by an id the
+        # database no longer knows, alongside one who is still present.
         coordinator.betting.get_bet_results = MagicMock(
             return_value={
-                "GHOST": [MagicMock(win=True, stake=100, winnings=100)],
-                present.name: [MagicMock(win=True, stake=50, winnings=50)],
+                0: [MagicMock(win=True, stake=100, winnings=100, bettor="GHOST")],
+                present.id: [MagicMock(win=True, stake=50, winnings=50, bettor=present.name)],
             }
         )
         coordinator.betting.create_bet_report = MagicMock(return_value="report")
 
-        def resolve(ctx, name):
-            member = MagicMock()
-            member.id = 0 if name == "GHOST" else present.id
-            return member
-
-        import onehead.coordinator as coordinator_module
-
-        original = coordinator_module.get_discord_member_from_name
-        coordinator_module.get_discord_member_from_name = resolve
-        try:
-            await coordinator.handle_bet_results(AsyncMock(), MagicMock())
-        finally:
-            coordinator_module.get_discord_member_from_name = original
+        await coordinator.handle_bet_results(AsyncMock(), MagicMock())
 
         # The present bettor is paid even though the ghost could not be.
         assert coordinator.database.get(present.id).rbucks == starting_rbucks + 100

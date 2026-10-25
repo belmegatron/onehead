@@ -365,8 +365,8 @@ class TestResult:
         )
 
         store.current_game._bets = [
-            Bet("HARRY", Side.RADIANT, 100),
-            Bet("HARRY", Side.DIRE, 500),
+            Bet("HARRY", 262570465212497920, Side.RADIANT, 100),
+            Bet("HARRY", 262570465212497920, Side.DIRE, 500),
         ]
 
         coordinator: GameCoordinator = cast(GameCoordinator, bot.get_cog("GameCoordinator"))

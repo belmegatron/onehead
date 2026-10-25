@@ -10,7 +10,6 @@ from discord.ext.commands import (
     has_role,
     max_concurrency,
 )
-from discord.member import Member
 from structlog import get_logger
 
 from onehead.common import (
@@ -20,7 +19,6 @@ from onehead.common import (
     Roles,
     Team,
     get_command_from_cog,
-    get_discord_member_from_name,
     get_player_names,
     play_sound,
 )
@@ -59,17 +57,24 @@ class Transfers(Cog):
         if len(transfers) == 0:
             return
 
+        refunded: int = 0
+
         for transfer in transfers:
-            member: Member | None = get_discord_member_from_name(ctx, transfer.buyer)
-            if member:
-                record: Player | None = self.database.get(member.id)
-                if record is None:
-                    continue
+            record: Player | None = self.database.get(transfer.buyer_id)
+            if record is None:
+                log.error(f"Unable to refund {transfer.amount} RBUCKS as buyer {transfer.buyer_id} is not in database.")
+                continue
 
-                record.rbucks += transfer.amount
-                self.database.update(record)
+            record.rbucks += transfer.amount
+            self.database.update(record)
+            refunded += 1
 
-        message: str = "All player transactions have been refunded."
+        # Do not claim everyone got their money back when someone did not.
+        if refunded == len(transfers):
+            message: str = "All player transactions have been refunded."
+        else:
+            message = f"`{refunded}` of `{len(transfers)}` player transactions have been refunded."
+
         log.info(message)
         await ctx.send(message)
 
@@ -97,9 +102,11 @@ class Transfers(Cog):
         if current_game.radiant is None or current_game.dire is None:
             raise OneHeadException(f"Expected valid teams: {current_game.radiant}, {current_game.dire}")
 
-        name: str = ctx.author.display_name
+        # Check the teams rather than the signups, which are keyed by display name - a
+        # player who renamed after signing up is still on a team.
+        participants: set[int] = {player.id for player in current_game.radiant + current_game.dire}
 
-        if name not in self.lobby.get_signups():
+        if ctx.author.id not in participants:
             await ctx.send(
                 f"{ctx.author.mention} is unable to shuffle as they are not participating in the current game."
             )
@@ -142,7 +149,7 @@ class Transfers(Cog):
         # with the teams untouched until someone stopped the game.
         record.rbucks -= Transfers.SHUFFLE_COST
         self.database.update(record)
-        transfers.append(PlayerTransfer(name, Transfers.SHUFFLE_COST))
+        transfers.append(PlayerTransfer(ctx.author.id, Transfers.SHUFFLE_COST))
 
         current_game.radiant, current_game.dire = shuffled_teams
 

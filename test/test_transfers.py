@@ -208,3 +208,90 @@ class TestRenamedPlayers:
 
         assert present.rbucks == 500
         assert "`1` of `2`" in ctx.send.await_args.args[0]
+
+
+class TestShuffleRedraw:
+    @pytest.mark.asyncio
+    async def test_a_redraw_does_not_repeat_the_balance_messages(self, bot: Bot) -> None:
+        """
+        The redraw loop called balance, which re-sends "Balancing teams..." and the MMR
+        line, and was unbounded - so an unlucky run spammed the channel.
+
+        Every draw here is deliberately a repeat, so the loop only ends because it is
+        bounded. The draw counter below trips rather than letting an unbounded loop run:
+        without it this test exhausts memory instead of failing, which is exactly what it
+        did against the unfixed code.
+        """
+        await add_ihl_role(bot, "IHL")
+        author = list(bot.get_all_members())[0]
+
+        # The author has to be on a team to be allowed to shuffle at all.
+        same_teams = (
+            (
+                create_test_player(bot),
+                create_fake_player(),
+                create_fake_player(),
+                create_fake_player(),
+                create_fake_player(),
+            ),
+            create_fake_team(),
+        )
+
+        store: GameStore = cast(GameStore, bot.get_cog("GameStore"))
+        store.current_game = ClassicGame()
+        store.current_game._transfer_window_open = True
+        store.current_game.radiant, store.current_game.dire = same_teams
+
+        transfers: Transfers = cast(Transfers, bot.get_cog("Transfers"))
+        transfers.database.get = Mock(return_value=Player(id=author.id, name="A", mmr=3000, rbucks=1000))
+        transfers.database.update = Mock()
+
+        # Every draw hands back the teams we already have, so every one is a repeat. The
+        # shared counter trips if the loop ever stops being bounded, whichever of the two
+        # it draws with, so the failure is immediate rather than a hang.
+        draw_limit: int = Transfers.MAX_SHUFFLE_ATTEMPTS + 5
+        draws: list[int] = []
+
+        def draw(*_: object, **__: object) -> tuple:
+            draws.append(1)
+            if len(draws) > draw_limit:
+                raise AssertionError(f"redraw loop exceeded {draw_limit} draws - is it still bounded?")
+            return same_teams
+
+        transfers.matchmaking.balance = AsyncMock(side_effect=draw)
+        transfers.matchmaking.calculate_balance = Mock(side_effect=draw)
+
+        with patch("onehead.transfers.play_sound"):
+            await dpytest.message("!shuffle")
+
+        # Announced once, then redrawn without announcing, and bounded.
+        transfers.matchmaking.balance.assert_awaited_once()
+        assert transfers.matchmaking.calculate_balance.call_count == Transfers.MAX_SHUFFLE_ATTEMPTS
+
+    @pytest.mark.asyncio
+    async def test_a_distinct_draw_needs_no_redraw(self, bot: Bot) -> None:
+        await add_ihl_role(bot, "IHL")
+        author = list(bot.get_all_members())[0]
+
+        store: GameStore = cast(GameStore, bot.get_cog("GameStore"))
+        store.current_game = ClassicGame()
+        store.current_game._transfer_window_open = True
+        store.current_game.radiant = (
+            create_test_player(bot),
+            create_fake_player(),
+            create_fake_player(),
+            create_fake_player(),
+            create_fake_player(),
+        )
+        store.current_game.dire = create_fake_team()
+
+        transfers: Transfers = cast(Transfers, bot.get_cog("Transfers"))
+        transfers.database.get = Mock(return_value=Player(id=author.id, name="A", mmr=3000, rbucks=1000))
+        transfers.database.update = Mock()
+        transfers.matchmaking.balance = AsyncMock(return_value=(create_fake_team(), create_fake_team()))
+        transfers.matchmaking.calculate_balance = Mock()
+
+        with patch("onehead.transfers.play_sound"):
+            await dpytest.message("!shuffle")
+
+        transfers.matchmaking.calculate_balance.assert_not_called()

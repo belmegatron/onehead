@@ -33,6 +33,9 @@ log: Logger = get_logger()
 
 class Transfers(Cog):
     SHUFFLE_COST: int = 500
+    # The draw picks at random from the 20 closest matchups, so a repeat is uncommon and a
+    # run of them vanishingly so. Give up after this many and hand over what we drew.
+    MAX_SHUFFLE_ATTEMPTS: int = 10
 
     def __init__(
         self,
@@ -139,9 +142,14 @@ class Transfers(Cog):
         )
 
         # TODO: Can we try and ensure at least 2 players have changed from the previous 2 shuffles?
-        while current_teams_names_only == shuffled_teams_names_only:
-            shuffled_teams = await self.matchmaking.balance(ctx)
+        # Draw again if we landed on the teams we already had. calculate_balance rather than
+        # balance, so a redraw does not repeat the "Balancing teams..." and MMR messages,
+        # and bounded, because this used to loop until the dice obliged.
+        attempts: int = 0
+        while current_teams_names_only == shuffled_teams_names_only and attempts < self.MAX_SHUFFLE_ATTEMPTS:
+            shuffled_teams = self.matchmaking.calculate_balance(ctx)
             shuffled_teams_names_only = get_player_names(shuffled_teams[0], shuffled_teams[1])
+            attempts += 1
 
         # Charge only once there is a shuffle to hand over. balance raises whenever the
         # signups have changed since the teams were picked - an admin using !rm during the

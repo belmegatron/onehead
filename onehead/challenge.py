@@ -37,6 +37,19 @@ class ChallengeMode(Cog):
         self.database: PlayerDatabase = database
         self.challenges: list[Challenge] = []
 
+    @staticmethod
+    def describe(ctx: Context, participant: Member | User) -> str:
+        """
+        Name a duel participant, mentioning them if they are still in the guild.
+
+        :param ctx: Discord context.
+        :param participant: The challenger or opponent to name.
+        :return: A mention, or their name if they have since left.
+        """
+        member: Member | None = get_discord_member_from_id(ctx, participant.id)
+
+        return member.mention if member else participant.display_name
+
     @has_role(Roles.MEMBER)
     @command()
     async def challenge(self, ctx: Context, opponent_name: str) -> None:
@@ -60,18 +73,28 @@ class ChallengeMode(Cog):
             await ctx.send("You cannot challenge yourself...")
             return
 
-        for challenge in self.challenges:
-            if challenge.challenger.id == challenger.id:
-                opponent = get_discord_member_from_id(ctx, challenge.opponent.id)
-                if opponent:
-                    await ctx.send(
-                        f"{challenger.mention} has already issued a challenge to {opponent.mention}!\n Stop sending for man, kmt."
-                    )
+        for existing in self.challenges:
+            # Careful not to reassign `opponent` here. Overwriting it with the member from
+            # an existing challenge used to leave the command returning with no message at
+            # all when that member had left the guild, so !challenge appeared to do nothing.
+            if existing.challenger.id == challenger.id:
+                await ctx.send(
+                    f"{challenger.mention} has already issued a challenge to "
+                    f"{self.describe(ctx, existing.opponent)}!\n Stop sending for man, kmt."
+                )
                 return
-            elif challenge.opponent.id == opponent.id:
-                other_challenger: Member | None = get_discord_member_from_id(ctx, challenge.challenger.id)
-                if other_challenger:
-                    await ctx.send(f"{opponent.mention} has already been challenged by {other_challenger.mention}!")
+
+            if existing.challenger.id == opponent.id and existing.opponent.id == challenger.id:
+                await ctx.send(
+                    f"{opponent.mention} has already challenged {challenger.mention} (id: `{existing.id}`) - "
+                    f"type `!accept {opponent.display_name}` rather than challenging them back."
+                )
+                return
+
+            if existing.opponent.id == opponent.id:
+                await ctx.send(
+                    f"{opponent.mention} has already been challenged by {self.describe(ctx, existing.challenger)}!"
+                )
                 return
 
         challenger_record: Player | None = self.database.get(challenger.id)

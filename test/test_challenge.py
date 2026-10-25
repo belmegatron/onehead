@@ -244,3 +244,59 @@ class TestBullyPathLeavesVoice:
         await dpytest.message("!challenge WEAKLING")
 
         assert "voice_client_disconnect" in scheduled
+
+
+class TestDuplicateChallenges:
+    @pytest.mark.asyncio
+    async def test_the_reverse_pairing_is_rejected(self, bot: Bot) -> None:
+        """
+        A challenges B, then B challenges A - both used to become live duels, each with
+        its own id, both acceptable and startable.
+        """
+        other = await join_member(bot, "RIVAL")
+        author = list(bot.get_all_members())[0]
+        await add_ihl_role(bot, "IHL")
+
+        challenge_mode: ChallengeMode = cast(ChallengeMode, bot.get_cog("ChallengeMode"))
+        stub_records(
+            challenge_mode,
+            Player(id=author.id, name="AUTHOR", mmr=5000),
+            Player(id=other.id, name="RIVAL", mmr=5000),
+        )
+
+        # RIVAL has already challenged the author.
+        existing = Challenge(0, challenger=other, opponent=author)
+        challenge_mode.challenges.append(existing)
+
+        await dpytest.message("!challenge RIVAL")
+
+        assert dpytest.verify().message().content("rather than challenging them back").contains()
+        assert len(challenge_mode.challenges) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_departed_opponent_still_gets_a_message(self, bot: Bot) -> None:
+        """
+        The existing opponent used to be looked up and assigned over `opponent`, with the
+        return outside the guard - so if they had left the guild, !challenge sent nothing
+        at all and looked broken.
+        """
+        other = await join_member(bot, "RIVAL")
+        author = list(bot.get_all_members())[0]
+        await add_ihl_role(bot, "IHL")
+
+        challenge_mode: ChallengeMode = cast(ChallengeMode, bot.get_cog("ChallengeMode"))
+        stub_records(
+            challenge_mode,
+            Player(id=author.id, name="AUTHOR", mmr=5000),
+            Player(id=other.id, name="RIVAL", mmr=5000),
+        )
+
+        # The author already challenged somebody who is no longer in the guild.
+        departed = MagicMock()
+        departed.id = 999999
+        departed.display_name = "LONG_GONE"
+        challenge_mode.challenges.append(Challenge(0, challenger=author, opponent=departed))
+
+        await dpytest.message("!challenge RIVAL")
+
+        assert dpytest.verify().message().content("has already issued a challenge to LONG_GONE").contains()

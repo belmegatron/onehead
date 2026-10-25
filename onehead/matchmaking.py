@@ -93,9 +93,12 @@ class Matchmaking(Cog):
 
         return rating_differences
 
-    def _calculate_balance(self, ctx: Context) -> TeamCombination:
+    def calculate_balance(self, ctx: Context) -> TeamCombination:
         """
-        Calculate balanced lineups for Radiant/Dire.
+        Calculate balanced lineups for Radiant/Dire, without announcing anything.
+
+        Public so that a shuffle can draw again without re-sending the messages `balance`
+        posts to the channel.
 
         :return: Returns a matchup of two, five-man teams that are evenly (or as close to evenly) matched based on
         a rating value associated with each player.
@@ -145,14 +148,14 @@ class Matchmaking(Cog):
         if signup_count != 10:
             err: str = f"Only `{signup_count}` Signups, require `{10 - signup_count}` more."
             await ctx.send(err)
-            # Carrying on only reached _calculate_balance, which raises anyway, with a
+            # Carrying on only reached calculate_balance, which raises anyway, with a
             # message about the database rather than the signups.
             raise OneHeadException(err)
 
         radiant: Team
         dire: Team
 
-        radiant, dire = self._calculate_balance(ctx)
+        radiant, dire = self.calculate_balance(ctx)
 
         radiant_mmr: int = sum([player.adjusted_mmr for player in radiant if player.adjusted_mmr])
         dire_mmr: int = sum([player.adjusted_mmr for player in dire if player.adjusted_mmr])

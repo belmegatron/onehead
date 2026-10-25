@@ -108,4 +108,4 @@ class TestDuplicateProfiles:
         monkeypatch.setattr(mm, "_get_player_records", lambda ctx: profiles)
 
         with pytest.raises(OneHeadException, match="Possible duplicate player name"):
-            mm._calculate_balance(ctx=None)  # type: ignore[arg-type]
+            mm.calculate_balance(ctx=None)  # type: ignore[arg-type]

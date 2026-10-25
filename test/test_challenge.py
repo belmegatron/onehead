@@ -1,13 +1,16 @@
+from datetime import UTC, datetime
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import discord.ext.test as dpytest
 import pytest
 from conftest import add_ihl_role, join_member
+from discord.errors import HTTPException
 from discord.ext.commands import Bot
 
 from onehead.challenge import ChallengeMode
 from onehead.common import Player
+from onehead.game import Challenge
 
 
 def stub_records(challenge_mode: ChallengeMode, *players: Player) -> None:
@@ -133,3 +136,111 @@ class TestSelfChallenge:
         await dpytest.message(f"!challenge {author.display_name}")
 
         assert dpytest.verify().message().content("You cannot challenge yourself...")
+
+
+class TestExpiry:
+    """
+    handle_expired_challenge is the only thing that removes a challenge from the list on
+    the non-rejected path, and Challenge.start() used to cancel it - called from accept -
+    so an accepted duel that no admin ever started stayed in the list for the lifetime of
+    the process, blocking its challenger from issuing another.
+    """
+
+    @pytest.mark.asyncio
+    async def test_an_accepted_challenge_keeps_its_expiry_timer(self, bot: Bot) -> None:
+        challenge = Challenge(1, MagicMock(), MagicMock())
+        challenge.handle_expiration_task = MagicMock()
+        challenge.start()
+
+        assert challenge.in_progress() is True
+        challenge.handle_expiration_task.cancel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_expiry_stops_the_timer(self, bot: Bot) -> None:
+        challenge = Challenge(1, MagicMock(), MagicMock())
+        challenge.handle_expiration_task = MagicMock()
+
+        challenge.cancel_expiry()
+
+        challenge.handle_expiration_task.cancel.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_an_unaccepted_challenge_is_removed_and_announced(self, bot: Bot) -> None:
+        challenge_mode: ChallengeMode = cast(ChallengeMode, bot.get_cog("ChallengeMode"))
+
+        challenge = Challenge(1, MagicMock(), MagicMock())
+        challenge.expires = datetime.now(UTC)
+        challenge_mode.challenges.append(challenge)
+
+        ctx = AsyncMock()
+        await challenge_mode.handle_expired_challenge(ctx, challenge)
+
+        assert challenge not in challenge_mode.challenges
+        assert "failed to accept" in ctx.send.await_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_an_accepted_but_unstarted_challenge_is_still_removed(self, bot: Bot) -> None:
+        challenge_mode: ChallengeMode = cast(ChallengeMode, bot.get_cog("ChallengeMode"))
+
+        challenge = Challenge(1, MagicMock(), MagicMock())
+        challenge.expires = datetime.now(UTC)
+        challenge.start()
+        challenge_mode.challenges.append(challenge)
+
+        ctx = AsyncMock()
+        await challenge_mode.handle_expired_challenge(ctx, challenge)
+
+        assert challenge not in challenge_mode.challenges
+        assert "never started" in ctx.send.await_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_a_failing_announcement_still_leaves_the_list_clean(self, bot: Bot) -> None:
+        """
+        Announcing before removing meant a send that failed a day later kept the challenge
+        alive forever.
+        """
+        challenge_mode: ChallengeMode = cast(ChallengeMode, bot.get_cog("ChallengeMode"))
+
+        challenge = Challenge(1, MagicMock(), MagicMock())
+        challenge.expires = datetime.now(UTC)
+        challenge_mode.challenges.append(challenge)
+
+        ctx = AsyncMock()
+        ctx.send = AsyncMock(side_effect=HTTPException(MagicMock(status=404), "channel gone"))
+
+        with pytest.raises(HTTPException):
+            await challenge_mode.handle_expired_challenge(ctx, challenge)
+
+        assert challenge not in challenge_mode.challenges
+
+
+class TestBullyPathLeavesVoice:
+    @pytest.mark.asyncio
+    async def test_the_bot_does_not_stay_parked_after_the_taunt(self, bot: Bot, monkeypatch) -> None:
+        """
+        bully.mp3 pulls the bot into voice, and no game is created on this path, so without
+        an explicit disconnect nothing would ever get it out again.
+        """
+        import onehead.challenge as challenge_module
+
+        scheduled: list[str] = []
+        monkeypatch.setattr(
+            challenge_module,
+            "create_background_task",
+            lambda coro, name: (coro.close(), scheduled.append(name))[1],
+        )
+
+        target = await join_member(bot, "WEAKLING")
+        author = list(bot.get_all_members())[0]
+        await add_ihl_role(bot, "IHL")
+
+        challenge_mode: ChallengeMode = cast(ChallengeMode, bot.get_cog("ChallengeMode"))
+        stub_records(
+            challenge_mode,
+            Player(id=author.id, name="AUTHOR", mmr=9000),
+            Player(id=target.id, name="WEAKLING", mmr=1000),
+        )
+
+        await dpytest.message("!challenge WEAKLING")
+
+        assert "voice_client_disconnect" in scheduled

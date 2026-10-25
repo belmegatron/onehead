@@ -101,10 +101,16 @@ class Challenge(Game):
         self.challenger: Member | User = challenger
         self.opponent: Member | User = opponent
         self.expires: datetime = datetime.now(tz=UTC) + timedelta(hours=24)
-        self.complete: bool = False
         self.handle_expiration_task: asyncio.Task | None = None
 
-    def start(self) -> None:
-        super().start()
+    def cancel_expiry(self) -> None:
+        """
+        Stop the expiry timer, as the challenge is no longer waiting on anyone.
+
+        Not done on acceptance: the expiry task is the only thing that removes a
+        challenge from the list, so cancelling it there left an accepted duel that no
+        admin ever started sitting in the list forever, blocking its challenger from
+        issuing another.
+        """
         if self.handle_expiration_task:
             self.handle_expiration_task.cancel()

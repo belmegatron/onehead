@@ -1,5 +1,5 @@
 import itertools
-from asyncio import create_task, sleep
+from asyncio import sleep
 from datetime import UTC, datetime, timedelta
 from logging import Logger
 from typing import Any
@@ -90,6 +90,9 @@ class ChallengeMode(Cog):
                 f"{challenger.mention}, your opponent cannot be more than `{self.MAX_RATING_DIFFERENCE}` "
                 "MMR below you. Pick on someone your own size."
             )
+            # play_sound has just pulled the bot into the author's voice channel, and no
+            # game is created on this path, so nothing else would ever get it out again.
+            create_background_task(voice_client_disconnect(ctx), "voice_client_disconnect")
             return
 
         # TODO: Persist challenges to database.
@@ -101,7 +104,9 @@ class ChallengeMode(Cog):
         )
 
         challenge: Challenge = Challenge(next(self.counter), challenger=challenger, opponent=opponent)
-        challenge.handle_expiration_task = create_task(self.handle_expired_challenge(ctx, challenge))
+        challenge.handle_expiration_task = create_background_task(
+            self.handle_expired_challenge(ctx, challenge), f"handle_expired_challenge:{challenge.id}"
+        )
         create_background_task(voice_client_disconnect(ctx), "voice_client_disconnect")
         self.challenges.append(challenge)
 
@@ -164,8 +169,7 @@ class ChallengeMode(Cog):
                 f"{challenge.opponent.mention} has rejected the challenge issued by {challenge.challenger.mention}."
             )
             await play_sound(ctx, "shame.mp3")
-            if challenge.handle_expiration_task:
-                challenge.handle_expiration_task.cancel()
+            challenge.cancel_expiry()
             self.challenges.remove(challenge)
         else:
             await ctx.send(f"Unable to find challenge issued to {ctx.author.mention} by {name}.")
@@ -196,12 +200,21 @@ class ChallengeMode(Cog):
         # TODO: Maybe break this up and add reminder messages.
         await sleep(to_wait.total_seconds())
 
-        if challenge.complete is False:
-            await ctx.send(
-                f"{challenge.opponent.mention} has failed to accept {challenge.challenger.mention}'s request to duel (id: `{challenge.id}`) due to it expiring."
-            )
-
+        # Remove before announcing. Announcing first meant a send that failed a day later -
+        # a deleted channel, revoked permissions - left the challenge in the list for good,
+        # and its challenger unable to issue another.
         try:
             self.challenges.remove(challenge)
         except ValueError:
             pass
+
+        if challenge.in_progress():
+            await ctx.send(
+                f"The duel between {challenge.challenger.mention} and {challenge.opponent.mention} "
+                f"(id: `{challenge.id}`) was accepted but never started, and has expired."
+            )
+            return
+
+        await ctx.send(
+            f"{challenge.opponent.mention} has failed to accept {challenge.challenger.mention}'s request to duel (id: `{challenge.id}`) due to it expiring."
+        )

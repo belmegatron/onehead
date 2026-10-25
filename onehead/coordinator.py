@@ -269,6 +269,8 @@ class GameCoordinator(Cog):
                 await play_sound(ctx, "fight.mp3")
                 self.store.current_game = target_challenge
                 target_challenge.start()
+                # The duel is live, so it is no longer waiting to be accepted or started.
+                target_challenge.cancel_expiry()
 
                 challenger_odds: float
                 opponent_odds: float
